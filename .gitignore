@@ -1,0 +1,15 @@
+build/
+build-*/
+cmake-build-*/
+.cache/
+.DS_Store
+*.user
+*.suo
+.idea/
+.vscode/
+xcuserdata/
+DerivedData/
+*.vst3
+*.zip
+*.component
+CMakeUserPresets.json
