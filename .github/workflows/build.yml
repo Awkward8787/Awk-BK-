@@ -59,7 +59,8 @@ jobs:
           Copy-Item -LiteralPath "THIRD_PARTY_NOTICES.md" -Destination (Join-Path $resources "THIRD_PARTY_NOTICES.md") -Force
           if (Test-Path AwkBK-windows.zip) { Remove-Item AwkBK-windows.zip }
           Compress-Archive -Path @($vstPath, (Resolve-Path "THIRD_PARTY_NOTICES.md")) -DestinationPath AwkBK-windows.zip
-          $listing = tar -tf AwkBK-windows.zip
+          $listing = (tar -tf AwkBK-windows.zip | Out-String)
+          Write-Host $listing
           if ($listing -notmatch "THIRD_PARTY_NOTICES.md") { throw "Windows zip is missing THIRD_PARTY_NOTICES.md" }
           if ($listing -notmatch "Awk BK.vst3") { throw "Windows zip is missing the VST3 bundle" }
           Get-Item AwkBK-windows.zip | Format-List Name, Length
