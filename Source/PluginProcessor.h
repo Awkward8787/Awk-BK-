@@ -1,4 +1,4 @@
-// Awk BK — pitch and BPM detector
+// Awk BK - pitch and BPM detector
 // Copyright (C) 2026 Anthony Jaamal Jones (AwkBeats)
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -13,6 +13,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -60,10 +61,14 @@ private:
     void startAnalysisThread();
     void stopAnalysisThread();
     void analysisLoop();
-    void publishTap();
     void runPitch (float sensitivity, float windowAmount, bool fileMode);
     void runTempo (float sensitivity, float windowAmount, bool fileMode);
-    void copyLatest (int count, float* dest) const;
+    // Copies the latest samples. Returns false when the seqlock tears, in which
+    // case the destination must not be analyzed.
+    bool copyLatest (int count, float* dest) const;
+    // Keeps a gap between the copied region and the writer so a long FILE window
+    // is not the entire ring.
+    int cappedCopyCount (int requested) const noexcept;
     bool isLocked() const noexcept;
 
     static constexpr int kWavePoints = 256;
@@ -90,6 +95,8 @@ private:
     bool haveTempo = false;
     float smoothLogHz = 0.0f;
     float smoothBpm = 0.0f;
+    std::chrono::steady_clock::time_point lastPitchPass {};
+    bool haveLastPitchPass = false;
 
     int waveDecim = 128;
     int waveCount = 0;

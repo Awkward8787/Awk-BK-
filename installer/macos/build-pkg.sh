@@ -3,11 +3,11 @@
 # /Library/Audio/Plug-Ins/VST3/. Requires a built VST3 under build/.
 set -euo pipefail
 
-version="${1:-0.1.1}"
+version="${1:-0.1.2}"
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-vst=$(find "$repo/build" -type d -name "Awk BK.vst3" | head -n 1)
-if [[ -z "$vst" ]]; then
-  echo "Awk BK.vst3 was not found under build/. Build the VST3 first." >&2
+vst="$repo/build/AwkBK_artefacts/Release/VST3/Awk BK.vst3"
+if [[ ! -d "$vst" ]]; then
+  echo "Release bundle not found at build/AwkBK_artefacts/Release/VST3/Awk BK.vst3. Build the Release VST3 first." >&2
   exit 1
 fi
 
@@ -17,6 +17,8 @@ trap 'rm -rf "$work"' EXIT
 payload="$work/payload"
 mkdir -p "$payload/Library/Audio/Plug-Ins/VST3"
 cp -R "$vst" "$payload/Library/Audio/Plug-Ins/VST3/"
+mkdir -p "$payload/Library/Audio/Plug-Ins/VST3/Awk BK.vst3/Contents/Resources"
+cp "$repo/THIRD_PARTY_NOTICES.md" "$payload/Library/Audio/Plug-Ins/VST3/Awk BK.vst3/Contents/Resources/THIRD_PARTY_NOTICES.md"
 
 pkgbuild \
   --root "$payload" \
@@ -29,7 +31,7 @@ cat > "$work/welcome.html" <<'EOF'
 <html><body style="font-family: -apple-system, Helvetica, sans-serif;">
 <p>Awk BK installs the AwkBeats pitch and BPM detector into <code>/Library/Audio/Plug-Ins/VST3/</code>.</p>
 <p>When setup finishes, open FL Studio and choose Options → Manage plugins → Find plugins. Confirm Awk BK by AwkBeats appears.</p>
-<p>This package is unsigned. macOS may ask you to allow it the first time.</p>
+<p>This package is unsigned. On macOS 15 and later, allow it under System Settings, Privacy and Security, Open Anyway. On older macOS, right-click the package and choose Open.</p>
 </body></html>
 EOF
 

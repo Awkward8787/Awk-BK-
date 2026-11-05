@@ -1,7 +1,11 @@
 name: Build Awk BK
 
-# Every release of Awk BK publishes a Windows setup exe and a macOS pkg,
-# plus the raw VST3 zips. Pull requests upload the same files as artifacts.
+# Version tags publish a Windows setup exe and a macOS pkg, plus the raw
+# VST3 zips. Pull requests upload the same files as artifacts.
+# v0.1.0 predates the installers and shipped as zips only.
+# AwkBKPreview stays out of CI. It paints a JUCE editor and needs a display
+# session, so a required job would be flaky. Build it locally with
+# -DAWK_BUILD_PREVIEW=ON.
 on:
   pull_request:
   push:
@@ -47,17 +51,23 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $vst = Get-ChildItem -Path build -Recurse -Directory -Filter "Awk BK.vst3" | Select-Object -First 1
-          if (-not $vst) { throw "Windows VST3 bundle was not produced" }
-          Write-Host "Packaging $($vst.FullName)"
+          $vstPath = Join-Path (Resolve-Path "build\AwkBK_artefacts\Release\VST3") "Awk BK.vst3"
+          if (-not (Test-Path -LiteralPath $vstPath)) { throw "Release VST3 bundle was not produced at build\AwkBK_artefacts\Release\VST3\Awk BK.vst3" }
+          Write-Host "Packaging $vstPath"
+          $resources = Join-Path $vstPath "Contents\Resources"
+          New-Item -ItemType Directory -Force -Path $resources | Out-Null
+          Copy-Item -LiteralPath "THIRD_PARTY_NOTICES.md" -Destination (Join-Path $resources "THIRD_PARTY_NOTICES.md") -Force
           if (Test-Path AwkBK-windows.zip) { Remove-Item AwkBK-windows.zip }
-          Compress-Archive -Path $vst.FullName -DestinationPath AwkBK-windows.zip
+          Compress-Archive -Path @($vstPath, (Resolve-Path "THIRD_PARTY_NOTICES.md")) -DestinationPath AwkBK-windows.zip
+          $listing = tar -tf AwkBK-windows.zip
+          if ($listing -notmatch "THIRD_PARTY_NOTICES.md") { throw "Windows zip is missing THIRD_PARTY_NOTICES.md" }
+          if ($listing -notmatch "Awk BK.vst3") { throw "Windows zip is missing the VST3 bundle" }
           Get-Item AwkBK-windows.zip | Format-List Name, Length
 
       - name: Install Inno Setup
         if: runner.os == 'Windows'
         shell: pwsh
-        run: choco install innosetup --yes --no-progress
+        run: choco install innosetup --version=6.7.0 --yes --no-progress
 
       - name: Build Windows installer
         if: runner.os == 'Windows'
@@ -75,12 +85,19 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          VST=$(find build -type d -name "Awk BK.vst3" | head -n 1)
-          test -n "$VST"
+          VST="build/AwkBK_artefacts/Release/VST3/Awk BK.vst3"
+          test -d "$VST"
           echo "Packaging $VST"
+          mkdir -p "$VST/Contents/Resources"
+          cp THIRD_PARTY_NOTICES.md "$VST/Contents/Resources/THIRD_PARTY_NOTICES.md"
+          rm -f AwkBK-macos.zip
+          # --keepParent puts Awk BK.vst3 at the archive root, same layout as v0.1.1.
           ditto -c -k --keepParent "$VST" AwkBK-macos.zip
+          zip -j AwkBK-macos.zip THIRD_PARTY_NOTICES.md
           ls -lh AwkBK-macos.zip
           unzip -l AwkBK-macos.zip | head -n 40
+          unzip -l AwkBK-macos.zip | grep -q "Awk BK.vst3/Contents/"
+          unzip -l AwkBK-macos.zip | grep -q "THIRD_PARTY_NOTICES.md"
 
       - name: Build macOS installer
         if: runner.os == 'macOS'
@@ -93,6 +110,7 @@ jobs:
           test -s AwkBK-macos.pkg
           pkgutil --expand-full AwkBK-macos.pkg /tmp/awk-pkg-expand
           find /tmp/awk-pkg-expand -type d -name "Awk BK.vst3" | grep -q .
+          find /tmp/awk-pkg-expand -name THIRD_PARTY_NOTICES.md | grep -q .
 
       - name: Upload VST3 zip
         uses: actions/upload-artifact@v4
