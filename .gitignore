@@ -1,6 +1,8 @@
 build/
 build-*/
 cmake-build-*/
+installer/staging/
+installer/output/
 .cache/
 .DS_Store
 *.user

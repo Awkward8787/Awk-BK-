@@ -1,14 +1,29 @@
 # Awk BK
 
-**Awk BK** is an AwkBeats pitch and BPM detector for FL Studio. It is a 64-bit VST3 analyzer: the audio you send in comes back out unchanged, and the panel shows what it hears.
+![Awk BK](assets/awkbeats-detect-mockup.jpg)
 
-![Awk BK mockup](assets/awkbeats-detect-mockup.jpg)
+**Awk BK** is an AwkBeats VST3 analyzer that detects pitch (note + cents), musical key, and BPM from the audio running through it. The sound itself passes through unchanged.
 
-The header uses the official AwkBeats logo (`assets/AwkBeatsLogo.png`). The mockup above is the design reference and lives in the repo next to it.
+It is for producers using FL Studio on Windows and Mac who need to read a beat’s key, pitch, and tempo while they work.
 
-This is the editor itself, after a generated F#3 tone and a 140 BPM click train. The readout is the detector, not a baked-in number:
+Made by **AwkBeats**, created by Anthony Jaamal Jones (Awkward J).
 
-![Awk BK editor](assets/awk-bk-ui.png)
+## Download
+
+**[Awk BK v0.1.1](https://github.com/Awkward8787/Awk-BK-/releases/tag/v0.1.1)**
+
+- [Windows installer (`AwkBK-windows-setup.exe`)](https://github.com/Awkward8787/Awk-BK-/releases/download/v0.1.1/AwkBK-windows-setup.exe) — installs into `C:\Program Files\Common Files\VST3\`
+- [macOS installer (`AwkBK-macos.pkg`)](https://github.com/Awkward8787/Awk-BK-/releases/download/v0.1.1/AwkBK-macos.pkg) — installs into `/Library/Audio/Plug-Ins/VST3/`
+
+The installers are unsigned. On Windows, SmartScreen may say “Windows protected your PC”; choose **More info → Run anyway**. On macOS, the package may need a right-click → **Open**, an allowance under **System Settings → Privacy & Security**, or:
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/AwkBK-macos.pkg
+```
+
+After either installer finishes, open FL Studio and choose **Options → Manage plugins → Find plugins**. Confirm **Awk BK** by **AwkBeats** appears, then load it on a mixer track and route the audio you want to read into that track.
+
+The raw plugin bundles are on the same release if you would rather copy them yourself: [AwkBK-windows.zip](https://github.com/Awkward8787/Awk-BK-/releases/download/v0.1.1/AwkBK-windows.zip) and [AwkBK-macos.zip](https://github.com/Awkward8787/Awk-BK-/releases/download/v0.1.1/AwkBK-macos.zip). Put `Awk BK.vst3` in `C:\Program Files\Common Files\VST3\` on Windows, or in `/Library/Audio/Plug-Ins/VST3/` (all users) or `~/Library/Audio/Plug-Ins/VST3/` (just you) on macOS. Clear quarantine on the bundle the same way if macOS blocks it.
 
 ## What it shows
 
@@ -21,9 +36,15 @@ This is the editor itself, after a generated F#3 tone and a 140 BPM click train.
 - **WINDOW** — analysis length. Longer is steadier and slower.
 - **MODE** — **LIVE** follows the input. **FILE** uses a longer window for bounced audio or playlist playback.
 
-Manufacturer **AwkBeats**, plugin **Awk BK**. VST3 codes are `AwBt` / `AwBk` so the plugin does not collide with other ids. MIDI output is not part of this version. There is no network access, telemetry, or analytics.
+VST3 codes are `AwBt` / `AwBk` so the plugin does not collide with other ids. MIDI output is not part of this version. There is no network access, telemetry, or analytics.
 
-Pitch detection is monophonic. A chord, a drum loop with no clear onsets, or atonal audio will wander or sit at low confidence. Tempo is most reliable with clear hits and can still land on half or double time. The key estimate needs a few seconds of pitched notes; one held tone is not enough to name a key with confidence.
+Pitch detection is monophonic. A chord, a drum loop with no clear onsets, or atonal audio will wander or sit at low confidence. Tempo is most reliable with clear hits and can still land on half or double time. The key estimate needs several pitch classes; one held tone is not enough to name a key.
+
+The picture above is the design reference. This is the running editor after a generated F#3 tone and a 140 BPM click train (the numbers come from the detector):
+
+![Awk BK editor reading a generated tone](assets/awk-bk-ui.png)
+
+The header uses the official AwkBeats logo in `assets/AwkBeatsLogo.png`.
 
 ## License
 
@@ -32,6 +53,10 @@ Awk BK is licensed under the **GNU Affero General Public License v3.0**. See [LI
 JUCE 7 and earlier offered a GPLv3 open-source option. From JUCE 8 onward the open-source license is the **AGPLv3** ([JUCE 8 licence](https://juce.com/legal/juce-8-licence/)). This project pins [JUCE 8.0.17-security](https://github.com/juce-framework/JUCE/releases/tag/8.0.17-security) via CMake FetchContent, so the plugin is AGPLv3. That is the license that allows shipping it without a paid JUCE license. A GPLv3-only grant would not cover linking this JUCE.
 
 JUCE 8.0.17 does not draw the old JUCE splash screen (the `JUCE_DISPLAY_SPLASH_SCREEN` flag is ignored). The AGPL still applies: if you distribute the plugin, offer this source with it. For a VST3 installed on your own machine, the AGPL's extra network clause does not change normal use.
+
+## Releases
+
+Every release of Awk BK includes a Windows installer, a macOS installer, the screenshot at the top of this page, and the short description of what the plugin does. GitHub Actions builds both installers (and the raw VST3 zips) on pull requests and publishes them when a version tag is pushed. A release is not complete without `AwkBK-windows-setup.exe` and `AwkBK-macos.pkg`.
 
 ## Build
 
@@ -45,9 +70,9 @@ ctest --test-dir build -C Release --output-on-failure
 
 The VST3 bundle is `Awk BK.vst3` under `build/AwkBK_artefacts/`. The DSP tests (`AwkBKTests`) do not need a DAW. They check that a generated sine maps to the expected note and cents, and that a click train maps near the expected BPM.
 
-**Windows:** Visual Studio 2022 Build Tools (or the full IDE) with the desktop C++ workload. The commands above produce an x64 bundle.
+**Windows installer:** install [Inno Setup 6](https://jrsoftware.org/isinfo.php), build the VST3, then run `installer/windows/build-setup.ps1`. It writes `AwkBK-windows-setup.exe`.
 
-**macOS:** Xcode command line tools. The CMake project builds a universal binary (`arm64` and `x86_64`) with a deployment target of macOS 11.
+**macOS installer:** with Xcode command line tools installed, run `bash installer/macos/build-pkg.sh 0.1.1`. It writes `AwkBK-macos.pkg`. The CMake project builds a universal binary (`arm64` and `x86_64`) with a deployment target of macOS 11.
 
 **Linux** (tests and a local VST3, not a release target):
 
@@ -57,34 +82,3 @@ sudo apt-get install -y build-essential cmake git pkg-config \
   libxinerama-dev libxcursor-dev libxext-dev libxi-dev \
   libgl1-mesa-dev libjack-jackd2-dev
 ```
-
-## Install in FL Studio
-
-The release zips are unsigned. No code-signing certificates are used.
-
-### Windows
-
-1. Unzip `AwkBK-windows.zip`.
-2. Copy the `Awk BK.vst3` bundle into `C:\Program Files\Common Files\VST3\`.
-3. In FL Studio: **Options → Manage plugins → Find plugins**.
-4. Confirm **Awk BK** by **AwkBeats** appears, then load it on a mixer track. Route the audio you want to read into that track.
-
-### macOS
-
-1. Unzip `AwkBK-macos.zip`.
-2. Copy `Awk BK.vst3` into `/Library/Audio/Plug-Ins/VST3/` (all users) or `~/Library/Audio/Plug-Ins/VST3/` (just you).
-3. macOS may refuse the unsigned plugin the first time. Clear the download quarantine, or allow it when Gatekeeper asks:
-
-   ```bash
-   xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/VST3/Awk BK.vst3"
-   ```
-
-   You can also right-click the bundle and choose Open, or allow it under **System Settings → Privacy & Security**.
-4. In FL Studio: **Options → Manage plugins → Find plugins**.
-5. Confirm **Awk BK** / **AwkBeats** appears.
-
-Use **LIVE** while tracking. Use **FILE** on a bounced clip or playlist playback when you want the readouts to sit still. **LOCK** holds the numbers where they are.
-
-## CI
-
-GitHub Actions builds the Windows and macOS VST3s on `windows-latest` and `macos-latest`, runs the DSP tests, and uploads `AwkBK-windows.zip` and `AwkBK-macos.zip`. A tag named `v*` publishes those zips on a GitHub Release.

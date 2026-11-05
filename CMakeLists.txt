@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "macOS deployment target" FORCE)
 endif()
 
-project(AwkBK VERSION 0.1.0 LANGUAGES C CXX)
+project(AwkBK VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -97,7 +97,7 @@ if(AWK_BUILD_PREVIEW)
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_REPORT_APP_USAGE=0
-        JucePlugin_VersionString="0.1.0"
+        "JucePlugin_VersionString=\"${PROJECT_VERSION}\""
     )
     target_link_libraries(AwkBKPreview PRIVATE
         AwkBKCore
