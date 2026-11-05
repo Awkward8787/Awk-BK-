@@ -5,9 +5,11 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <thread>
 #include <vector>
 
 namespace
@@ -62,6 +64,15 @@ void renderSineAndClicks (AwkBKProcessor& processor)
     std::cout << "passthrough max diff " << maxDiff << "\n";
     if (maxDiff > 0.0f)
         std::cout << "passthrough FAILED\n";
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds (3);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        const auto readout = processor.getReadout();
+        if (readout.voiced && readout.haveTempo)
+            break;
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
 }
 } // namespace
 
