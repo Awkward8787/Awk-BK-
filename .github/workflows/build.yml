@@ -1,0 +1,166 @@
+name: Build Awk BK
+
+# Every release of Awk BK publishes a Windows setup exe and a macOS pkg,
+# plus the raw VST3 zips. Pull requests upload the same files as artifacts.
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+concurrency:
+  group: awk-bk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            zip: AwkBK-windows.zip
+          - os: macos-latest
+            name: macos
+            zip: AwkBK-macos.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package Windows VST3
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vst = Get-ChildItem -Path build -Recurse -Directory -Filter "Awk BK.vst3" | Select-Object -First 1
+          if (-not $vst) { throw "Windows VST3 bundle was not produced" }
+          Write-Host "Packaging $($vst.FullName)"
+          if (Test-Path AwkBK-windows.zip) { Remove-Item AwkBK-windows.zip }
+          Compress-Archive -Path $vst.FullName -DestinationPath AwkBK-windows.zip
+          Get-Item AwkBK-windows.zip | Format-List Name, Length
+
+      - name: Install Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $match = Select-String -Path CMakeLists.txt -Pattern 'project\(AwkBK VERSION ([0-9]+\.[0-9]+\.[0-9]+)'
+          if (-not $match) { throw "Could not read the project version from CMakeLists.txt" }
+          $version = $match.Matches[0].Groups[1].Value
+          Write-Host "Installer version $version"
+          & installer\windows\build-setup.ps1 -Version $version
+          $setup = Get-Item AwkBK-windows-setup.exe
+          if ($setup.Length -lt 100kb) { throw "Windows installer looks too small" }
+
+      - name: Package macOS VST3
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          VST=$(find build -type d -name "Awk BK.vst3" | head -n 1)
+          test -n "$VST"
+          echo "Packaging $VST"
+          ditto -c -k --keepParent "$VST" AwkBK-macos.zip
+          ls -lh AwkBK-macos.zip
+          unzip -l AwkBK-macos.zip | head -n 40
+
+      - name: Build macOS installer
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/.*project(AwkBK VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt | head -n 1)
+          test -n "$version"
+          echo "Installer version $version"
+          bash installer/macos/build-pkg.sh "$version"
+          test -s AwkBK-macos.pkg
+          pkgutil --expand-full AwkBK-macos.pkg /tmp/awk-pkg-expand
+          find /tmp/awk-pkg-expand -type d -name "Awk BK.vst3" | grep -q .
+
+      - name: Upload VST3 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: AwkBK-${{ matrix.name }}
+          path: ${{ matrix.zip }}
+          if-no-files-found: error
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AwkBK-windows-setup
+          path: AwkBK-windows-setup.exe
+          if-no-files-found: error
+
+      - name: Upload macOS installer
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AwkBK-macos-pkg
+          path: AwkBK-macos.pkg
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: AwkBK-*
+          path: dist
+          merge-multiple: false
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          find dist -type f -print
+          windows_zip=$(find dist -type f -name 'AwkBK-windows.zip' | head -n 1)
+          windows_exe=$(find dist -type f -name 'AwkBK-windows-setup.exe' | head -n 1)
+          macos_zip=$(find dist -type f -name 'AwkBK-macos.zip' | head -n 1)
+          macos_pkg=$(find dist -type f -name 'AwkBK-macos.pkg' | head -n 1)
+          test -n "$windows_zip"
+          test -n "$windows_exe"
+          test -n "$macos_zip"
+          test -n "$macos_pkg"
+          test -s "$windows_exe"
+          test -s "$macos_pkg"
+          test -f RELEASE_NOTES.md
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "$windows_zip" "$windows_exe" "$macos_zip" "$macos_pkg" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "$windows_zip" "$windows_exe" "$macos_zip" "$macos_pkg" \
+              --title "Awk BK ${GITHUB_REF_NAME}" \
+              --notes-file RELEASE_NOTES.md
+          fi
