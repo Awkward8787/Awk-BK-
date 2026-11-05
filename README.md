@@ -92,7 +92,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 The VST3 bundle is `Awk BK.vst3` under `build/AwkBK_artefacts/Release/VST3/`. The DSP tests (`AwkBKTests`) do not need a DAW. They check that a generated sine maps to the expected note and cents, and that a click train maps near the expected BPM. `AwkBKProcessorTests` constructs the processor, runs the analysis thread, and checks that Lock freezes the readouts. A separate source lint only reads `PluginProcessor.cpp` as text.
 
-**Windows installer:** install [Inno Setup 6.7.0](https://jrsoftware.org/isinfo.php). CI installs the Chocolatey package `innosetup` at version 6.7.0. Build the Release VST3, then run `installer/windows/build-setup.ps1`. It writes `AwkBK-windows-setup.exe`. The installer is 64-bit Windows only (`ArchitecturesAllowed=x64`).
+**Windows installer:** install [Inno Setup 6.7.1](https://jrsoftware.org/isinfo.php). CI installs the Chocolatey package `innosetup` at version 6.7.1. Build the Release VST3, then run `installer/windows/build-setup.ps1`. It writes `AwkBK-windows-setup.exe`. The installer is 64-bit Windows only (`ArchitecturesAllowed=x64`).
 
 **macOS installer:** with Xcode command line tools installed, run `bash installer/macos/build-pkg.sh 0.1.2`. It writes `AwkBK-macos.pkg`. The CMake project builds a universal binary (`arm64` and `x86_64`) with a deployment target of macOS 11.
 
