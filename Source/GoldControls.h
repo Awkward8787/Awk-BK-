@@ -1,4 +1,4 @@
-// Awk BK — pitch and BPM detector
+// Awk BK - pitch and BPM detector
 // Copyright (C) 2026 Anthony Jaamal Jones (AwkBeats)
 // SPDX-License-Identifier: AGPL-3.0-or-later
 

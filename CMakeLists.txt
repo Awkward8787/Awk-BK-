@@ -6,7 +6,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_ARCHITECTURES)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "macOS deployment target" FORCE)
 endif()
 
-project(AwkBK VERSION 0.1.1 LANGUAGES C CXX)
+project(AwkBK VERSION 0.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -119,3 +119,38 @@ target_link_libraries(AwkBK PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
 )
+
+# Constructs the processor, runs the analysis thread, and toggles Lock.
+# The dsp test's processBlock check is only a source lint.
+add_executable(AwkBKProcessorTests
+    tests/ProcessorTest.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp
+)
+target_include_directories(AwkBKProcessorTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Source)
+target_compile_features(AwkBKProcessorTests PRIVATE cxx_std_17)
+target_compile_definitions(AwkBKProcessorTests PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_REPORT_APP_USAGE=0
+    "JucePlugin_VersionString=\"${PROJECT_VERSION}\""
+)
+target_link_libraries(AwkBKProcessorTests PRIVATE
+    AwkBKCore
+    AwkBKData
+    juce::juce_audio_utils
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+add_test(NAME processor COMMAND AwkBKProcessorTests)
+set_tests_properties(processor PROPERTIES TIMEOUT 60)
+
+if(TARGET AwkBK_VST3)
+    add_custom_command(TARGET AwkBK_VST3 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:AwkBK_VST3>/../Resources"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md"
+            "$<TARGET_FILE_DIR:AwkBK_VST3>/../Resources/THIRD_PARTY_NOTICES.md"
+        VERBATIM
+    )
+endif()

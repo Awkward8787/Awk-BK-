@@ -1,22 +1,26 @@
 # Build AwkBK-windows-setup.exe with Inno Setup 6.
 # Requires a Release build of the VST3 already present under build/.
 param(
-    [string]$Version = "0.1.1"
+    [string]$Version = "0.1.2"
 )
 
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Resolve-Path (Join-Path $here "..\..")
-$vst = Get-ChildItem -Path (Join-Path $repo "build") -Recurse -Directory -Filter "Awk BK.vst3" | Select-Object -First 1
-if (-not $vst) {
-    throw "Awk BK.vst3 was not found under build/. Configure and build the VST3 first."
+$vstPath = Join-Path $repo "build\AwkBK_artefacts\Release\VST3\Awk BK.vst3"
+if (-not (Test-Path -LiteralPath $vstPath)) {
+    throw "Release bundle not found at build\AwkBK_artefacts\Release\VST3\Awk BK.vst3. Build the Release VST3 first."
 }
+$vst = Get-Item -LiteralPath $vstPath
 
 $stage = Join-Path $here "..\staging"
 $bundle = Join-Path $stage "Awk BK.vst3"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force -Path $bundle | Out-Null
 Copy-Item -Recurse -Force (Join-Path $vst.FullName "*") $bundle
+$resources = Join-Path $bundle "Contents\Resources"
+New-Item -ItemType Directory -Force -Path $resources | Out-Null
+Copy-Item -LiteralPath (Join-Path $repo "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $resources "THIRD_PARTY_NOTICES.md") -Force
 
 $candidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",

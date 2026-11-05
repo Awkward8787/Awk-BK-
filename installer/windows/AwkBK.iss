@@ -1,9 +1,9 @@
 ; Awk BK Windows installer.
 ; Installs the VST3 bundle into the 64-bit system VST3 folder FL Studio scans.
-; Build with Inno Setup 6: ISCC /DMyAppVersion=0.1.1 AwkBK.iss
+; Build with Inno Setup 6: ISCC /DMyAppVersion=0.1.2 AwkBK.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.1"
+  #define MyAppVersion "0.1.2"
 #endif
 
 #define MyAppName "Awk BK"
@@ -25,8 +25,11 @@ OutputDir=..\output
 OutputBaseFilename=AwkBK-windows-setup
 Compression=lzma2
 SolidCompression=yes
+; 64-bit Windows only.
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
+; unins000.exe and unins000.dat must not land in the shared VST3 folder.
+UninstallFilesDir={commonpf64}\AwkBeats\Awk BK
 PrivilegesRequired=admin
 WizardStyle=modern
 UninstallDisplayName={#MyAppName} VST3
@@ -36,6 +39,8 @@ WelcomeLabel2=This installs the Awk BK VST3 into C:\Program Files\Common Files\V
 
 [Files]
 Source: "..\staging\Awk BK.vst3\*"; DestDir: "{app}\Awk BK.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\THIRD_PARTY_NOTICES.md"; DestDir: "{commonpf64}\AwkBeats\Awk BK"; Flags: ignoreversion
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\Awk BK.vst3"
+Type: files; Name: "{commonpf64}\AwkBeats\Awk BK\THIRD_PARTY_NOTICES.md"

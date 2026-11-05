@@ -1,4 +1,4 @@
-// Awk BK — pitch and BPM detector
+// Awk BK - pitch and BPM detector
 // Copyright (C) 2026 Anthony Jaamal Jones (AwkBeats)
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -9,6 +9,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <thread>
 
 namespace
 {
@@ -84,6 +87,7 @@ void AwkBKProcessor::prepareToPlay (double sampleRate, int)
     haveTempo = false;
     smoothLogHz = 0.0f;
     smoothBpm = 0.0f;
+    haveLastPitchPass = false;
     keyEstimator.reset();
 
     waveDecim = std::max (1, (int) std::lround (currentSampleRate * 0.0025));
@@ -133,11 +137,16 @@ void AwkBKProcessor::analysisLoop()
     auto nextPitch = clock::now();
     auto nextTempo = clock::now();
     auto tapHoldUntil = clock::time_point {};
+    auto lastAudioAt = clock::now();
+    std::int64_t lastSeen = -1;
 
     while (! analysisStop.load (std::memory_order_acquire))
     {
         if (isLocked())
         {
+            // Lock freezes the readouts, so the next pass after unlock should
+            // use the nominal interval instead of the whole locked gap.
+            haveLastPitchPass = false;
             std::this_thread::sleep_for (std::chrono::milliseconds (20));
             continue;
         }
@@ -153,10 +162,27 @@ void AwkBKProcessor::analysisLoop()
             haveTempoAtomic.store (1);
         }
 
+        // samplesSeen advances only from processBlock. Half a second without a
+        // new callback is the host stopped, which is longer than a large FL
+        // buffer and short enough that an idle instance stops running YIN.
+        // Taps above still apply. This thread never locks or waits the audio thread.
+        const auto seen = samplesSeen.load (std::memory_order_acquire);
+        const auto now = clock::now();
+        if (seen != lastSeen)
+        {
+            lastSeen = seen;
+            lastAudioAt = now;
+        }
+        else if (now - lastAudioAt > std::chrono::milliseconds (500))
+        {
+            haveLastPitchPass = false;
+            std::this_thread::sleep_for (std::chrono::milliseconds (100));
+            continue;
+        }
+
         const float sensitivity = sensParam != nullptr ? sensParam->load() : 0.32f;
         const float windowAmount = windowParam != nullptr ? windowParam->load() : 0.5f;
         const bool fileMode = fileModeParam != nullptr && fileModeParam->load() >= 0.5f;
-        const auto now = clock::now();
 
         if (now >= nextPitch)
         {
@@ -165,7 +191,7 @@ void AwkBKProcessor::analysisLoop()
             nextPitch = clock::now() + pitchHop;
         }
 
-        if (now >= nextTempo && clock::now() >= tapHoldUntil)
+        if (clock::now() >= nextTempo && clock::now() >= tapHoldUntil)
         {
             runTempo (sensitivity, windowAmount, fileMode);
             const auto tempoHop = std::chrono::milliseconds (fileMode ? 400 : 220);
@@ -244,30 +270,57 @@ void AwkBKProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     ringSeq.fetch_add (1, std::memory_order_release);
 }
 
-void AwkBKProcessor::copyLatest (int count, float* dest) const
+int AwkBKProcessor::cappedCopyCount (int requested) const noexcept
 {
     const int cap = (int) mono.size();
-    if (cap <= 0 || count <= 0)
-        return;
-    count = std::min (count, cap);
+    if (cap <= 1 || requested <= 0)
+        return 0;
+
+    // FILE mode at a long window used to ask for the whole ring, so the copy
+    // raced the writer on every sample. Keep at least a short gap.
+    const int margin = std::min (4096, cap / 4);
+    const int limit = cap - margin;
+    if (limit <= 0)
+        return 0;
+    return std::min (requested, limit);
+}
+
+bool AwkBKProcessor::copyLatest (int count, float* dest) const
+{
+    const int cap = (int) mono.size();
+    if (dest == nullptr || cap <= 1 || count <= 0 || count >= cap)
+        return false;
 
     for (int attempt = 0; attempt < 8; ++attempt)
     {
         const auto seq1 = ringSeq.load (std::memory_order_acquire);
         if ((seq1 & 1u) != 0u)
+        {
+            // processBlock is inside the write. Yield so the attempts are not
+            // all spent before that callback publishes the even sequence.
+            std::this_thread::yield();
             continue;
+        }
 
         int start = monoWrite.load (std::memory_order_acquire) - count;
         while (start < 0)
             start += cap;
 
-        for (int i = 0; i < count; ++i)
-            dest[i] = mono[(size_t) ((start + i) % cap)];
+        const int first = std::min (count, cap - start);
+        std::memcpy (dest, mono.data() + start, sizeof (float) * (size_t) first);
+        if (first < count)
+            std::memcpy (dest + first, mono.data(), sizeof (float) * (size_t) (count - first));
 
-        const auto seq2 = ringSeq.load (std::memory_order_acquire);
+        // On arm64 this fence keeps the plain reads above from moving past seq2.
+        std::atomic_thread_fence (std::memory_order_acquire);
+        const auto seq2 = ringSeq.load (std::memory_order_relaxed);
         if (seq1 == seq2)
-            return;
+            return true;
+
+        std::this_thread::yield();
     }
+
+    return false;
 }
 
 void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileMode)
@@ -285,13 +338,29 @@ void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileM
         ++factor;
     desired -= desired % factor;
 
-    const int hop = std::max (desired / 2, (int) std::lround (currentSampleRate * (fileMode ? 0.12 : 0.06)));
+    int count = cappedCopyCount (desired);
+    count -= count % factor;
 
-    if (desired < 1024 || samplesSeen.load() < desired || (int) scratch.size() < desired)
+    if (count < 1024 || samplesSeen.load() < count || (int) scratch.size() < count)
         return;
 
-    copyLatest (desired, scratch.data());
-    const int outCount = desired / factor;
+    if (! copyLatest (count, scratch.data()))
+        return;
+
+    // The analysis loop schedules passes on a wall clock (about 60 ms LIVE,
+    // 120 ms FILE). Key decay and the unvoiced hold follow that elapsed time.
+    // A sample hop here was about 1.4x too fast at WINDOW = 1.
+    const auto passNow = std::chrono::steady_clock::now();
+    float dt = fileMode ? 0.12f : 0.06f;
+    if (haveLastPitchPass)
+    {
+        dt = std::chrono::duration<float> (passNow - lastPitchPass).count();
+        dt = std::clamp (dt, 0.02f, 0.25f);
+    }
+    lastPitchPass = passNow;
+    haveLastPitchPass = true;
+
+    const int outCount = count / factor;
     for (int i = 0; i < outCount; ++i)
     {
         double sum = 0.0;
@@ -340,7 +409,6 @@ void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileM
 
         if (note.pitchClass >= 0 && note.midi >= 0)
         {
-            const float dt = (float) hop / (float) currentSampleRate;
             const float timeConstant = fileMode ? 14.0f : 7.0f;
             keyEstimator.decay (std::exp (-dt / timeConstant));
             keyEstimator.add (note.pitchClass, std::max (pitch.confidence, 0.05f));
@@ -356,7 +424,7 @@ void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileM
     }
     else if (holdSamples > 0)
     {
-        holdSamples -= hop;
+        holdSamples -= (int) std::lround ((double) dt * currentSampleRate);
         if (holdSamples <= 0)
         {
             voicedAtomic.store (0);
@@ -375,13 +443,13 @@ void AwkBKProcessor::runTempo (float sensitivity, float windowAmount, bool fileM
     if (fileMode)
         seconds = std::min (12.0f, seconds * 1.6f);
 
-    int count = (int) std::lround (currentSampleRate * (double) seconds);
-    count = std::min (count, (int) scratch.size());
+    int count = cappedCopyCount ((int) std::lround (currentSampleRate * (double) seconds));
 
-    if (count < (int) currentSampleRate || samplesSeen.load() < count)
+    if (count < (int) currentSampleRate || samplesSeen.load() < count || (int) scratch.size() < count)
         return;
 
-    copyLatest (count, scratch.data());
+    if (! copyLatest (count, scratch.data()))
+        return;
     const auto tempo = tempoDetector.detect (scratch.data(), count, currentSampleRate, clamp01 (sensitivity));
     if (isLocked() || ! tempo.valid)
         return;
