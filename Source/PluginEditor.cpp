@@ -11,11 +11,6 @@
 
 namespace
 {
-juce::String dash()
-{
-    return juce::String::charToString ((juce::juce_wchar) 0x2014);
-}
-
 juce::String formatCents (float cents)
 {
     int rounded = (int) std::lround (cents);
@@ -28,7 +23,7 @@ juce::String formatCents (float cents)
 juce::String formatNoteText (int midi)
 {
     if (midi < 0 || midi > 127)
-        return dash();
+        return "--";
     return juce::String (awk::pitchClassName (midi % 12)) + juce::String (midi / 12 - 1);
 }
 
@@ -196,12 +191,6 @@ void AwkBKEditor::drawHeader (juce::Graphics& g, juce::Rectangle<int> header) co
     g.setFont (awk::goldFont (18.0f, false, 0.28f));
     g.setColour (awk::palette::gold);
     g.drawFittedText ("DETECT", row.removeFromLeft (120), juce::Justification::centredLeft, 1);
-
-    auto close = juce::Rectangle<float> ((float) getWidth() - 50.0f, 30.0f, 20.0f, 20.0f);
-    g.setColour (awk::palette::gold.withAlpha (0.9f));
-    g.drawRoundedRectangle (close, 3.0f, 1.2f);
-    g.drawLine (close.getX() + 5.5f, close.getY() + 5.5f, close.getRight() - 5.5f, close.getBottom() - 5.5f, 1.2f);
-    g.drawLine (close.getRight() - 5.5f, close.getY() + 5.5f, close.getX() + 5.5f, close.getBottom() - 5.5f, 1.2f);
 }
 
 void AwkBKEditor::drawGlass (juce::Graphics& g, const Layout& layout, const awk::Readout& readout) const
@@ -304,13 +293,13 @@ void AwkBKEditor::drawPitch (juce::Graphics& g, juce::Rectangle<float> area, con
         g.drawFittedText (value, line.toNearestInt(), juce::Justification::centredLeft, 1);
     };
 
-    juce::String keyValue = dash();
+    juce::String keyValue = "--";
     if (readout.haveKey && readout.keyPitchClass >= 0)
         keyValue = juce::String (awk::pitchClassName (readout.keyPitchClass))
                    + (readout.keyMinor ? " MINOR" : " MAJOR");
 
     const int percent = (int) std::lround (juce::jlimit (0.0f, 1.0f, readout.keyConfidence) * 100.0f);
-    const auto confValue = readout.haveKey ? juce::String (percent) + "%" : dash();
+    const auto confValue = readout.haveKey ? juce::String (percent) + "%" : juce::String ("--");
 
     drawPair ("KEY", keyValue);
     drawPair ("CONF", confValue);
@@ -349,7 +338,10 @@ void AwkBKEditor::drawWave (juce::Graphics& g, juce::Rectangle<float> area) cons
     g.setColour (awk::palette::gold);
     g.strokePath (path, juce::PathStrokeType (1.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    constexpr int marker = 168;
+    const int marker = processor.newestWaveformIndex();
+    if (marker < 0 || marker >= 256)
+        return;
+
     const float markerX = area.getX() + area.getWidth() * ((float) marker / 255.0f);
     const float markerY = mid - juce::jlimit (-1.0f, 1.0f, samples[marker]) * scale;
     g.setColour (awk::palette::gold.withAlpha (0.8f));

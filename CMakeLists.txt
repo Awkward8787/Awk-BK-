@@ -44,6 +44,9 @@ endif()
 add_executable(AwkBKTests tests/TestMain.cpp)
 target_link_libraries(AwkBKTests PRIVATE AwkBKCore)
 target_compile_features(AwkBKTests PRIVATE cxx_std_17)
+target_compile_definitions(AwkBKTests PRIVATE
+    "AWK_PROCESSOR_SOURCE=\"${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp\""
+)
 
 enable_testing()
 add_test(NAME dsp COMMAND AwkBKTests)
@@ -65,6 +68,7 @@ juce_add_plugin(AwkBK
     PLUGIN_CODE AwBk
     FORMATS VST3
     PRODUCT_NAME "Awk BK"
+    COMPANY_COPYRIGHT "Copyright (C) 2026 Anthony Jaamal Jones (AwkBeats)"
     VST3_CATEGORIES Analyzer
     NEEDS_WEB_BROWSER FALSE
     NEEDS_CURL FALSE

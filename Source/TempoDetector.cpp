@@ -10,6 +10,9 @@
 namespace awk
 {
 
+// Onset strength from frame energy, then autocorrelation. This tempo
+// tracker is original to Awk BK; it is not a port of another library.
+
 namespace
 {
 constexpr float kBpmMin = 60.0f;

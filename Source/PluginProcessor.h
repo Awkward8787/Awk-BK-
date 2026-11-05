@@ -13,13 +13,14 @@
 
 #include <array>
 #include <atomic>
+#include <thread>
 #include <vector>
 
 class AwkBKProcessor : public juce::AudioProcessor
 {
 public:
     AwkBKProcessor();
-    ~AwkBKProcessor() override = default;
+    ~AwkBKProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -45,18 +46,25 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    // Message thread. Ignored by the readouts while Lock is on.
+    // Message thread. Returns immediately while Lock is on.
     void tap();
 
     awk::Readout getReadout() const;
     void copyWaveform (float* dest, int numPoints) const;
+    // Index of the newest sample in a buffer filled by copyWaveform, or -1.
+    int newestWaveformIndex() const noexcept;
 
     juce::AudioProcessorValueTreeState apvts;
 
 private:
-    void runPitch (float sensitivity, float windowAmount, bool fileMode, bool locked);
-    void runTempo (float sensitivity, float windowAmount, bool fileMode, bool locked);
+    void startAnalysisThread();
+    void stopAnalysisThread();
+    void analysisLoop();
+    void publishTap();
+    void runPitch (float sensitivity, float windowAmount, bool fileMode);
+    void runTempo (float sensitivity, float windowAmount, bool fileMode);
     void copyLatest (int count, float* dest) const;
+    bool isLocked() const noexcept;
 
     static constexpr int kWavePoints = 256;
 
@@ -67,8 +75,9 @@ private:
 
     double currentSampleRate = 48000.0;
     std::vector<float> mono;
-    int monoWrite = 0;
-    std::int64_t samplesSeen = 0;
+    std::atomic<int> monoWrite { 0 };
+    std::atomic<std::uint32_t> ringSeq { 0 };
+    std::atomic<std::int64_t> samplesSeen { 0 };
     std::vector<float> scratch;
     std::vector<float> analysis;
 
@@ -76,10 +85,7 @@ private:
     awk::TempoDetector tempoDetector;
     awk::KeyEstimator keyEstimator;
 
-    int samplesUntilPitch = 0;
-    int samplesUntilTempo = 0;
     int holdSamples = 0;
-    int tapHoldSamples = 0;
     bool pitchReady = false;
     bool haveTempo = false;
     float smoothLogHz = 0.0f;
@@ -90,6 +96,10 @@ private:
     float waveAccum = 0.0f;
     std::array<float, kWavePoints> waveform {};
     std::atomic<int> waveWrite { 0 };
+    std::atomic<int> waveFilled { 0 };
+
+    std::atomic<bool> analysisStop { false };
+    std::thread analysisThread;
 
     std::atomic<float> bpmAtomic { 0.0f };
     std::atomic<int> haveTempoAtomic { 0 };

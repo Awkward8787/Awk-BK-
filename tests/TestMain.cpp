@@ -8,10 +8,15 @@
 #include "TempoDetector.h"
 
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
 #include <vector>
+
+#ifndef AWK_PROCESSOR_SOURCE
+ #define AWK_PROCESSOR_SOURCE "Source/PluginProcessor.cpp"
+#endif
 
 namespace
 {
@@ -91,6 +96,40 @@ void expectPitch (const char* label, const std::vector<float>& buffer, double sa
                + " expected " + std::to_string (expectedCents));
 }
 
+void testAudioCallbackDoesNotAnalyze()
+{
+    std::ifstream input (AWK_PROCESSOR_SOURCE);
+    std::string text ((std::istreambuf_iterator<char> (input)), {});
+    check (input.good() || ! text.empty(), std::string ("read ") + AWK_PROCESSOR_SOURCE);
+
+    const auto blockAt = text.find ("void AwkBKProcessor::processBlock");
+    const auto nextAt = text.find ("void AwkBKProcessor::copyLatest");
+    check (blockAt != std::string::npos && nextAt != std::string::npos && nextAt > blockAt,
+           "processBlock is present");
+    if (blockAt == std::string::npos || nextAt == std::string::npos || nextAt <= blockAt)
+        return;
+
+    const auto block = text.substr (blockAt, nextAt - blockAt);
+    const char* banned[] = { "runPitch", "runTempo", "pitchDetector", "tempoDetector", ".detect(" };
+    for (const char* word : banned)
+        check (block.find (word) == std::string::npos,
+               std::string ("processBlock does not reference ") + word);
+
+    check (block.find ("midiMessages.clear()") != std::string::npos, "processBlock clears MIDI");
+    check (text.find ("std::thread") != std::string::npos, "analysis is started on a std::thread");
+    check (text.find ("void AwkBKProcessor::analysisLoop()") != std::string::npos,
+           "YIN and tempo run from analysisLoop");
+    const auto loopAt = text.find ("void AwkBKProcessor::analysisLoop()");
+    const auto loopEnd = text.find ("bool AwkBKProcessor::isBusesLayoutSupported");
+    if (loopAt != std::string::npos && loopEnd != std::string::npos && loopEnd > loopAt)
+    {
+        const auto loop = text.substr (loopAt, loopEnd - loopAt);
+        check (loop.find ("isLocked()") != std::string::npos, "analysisLoop skips work while locked");
+        check (loop.find ("runPitch") != std::string::npos, "analysisLoop owns pitch");
+        check (loop.find ("runTempo") != std::string::npos, "analysisLoop owns tempo");
+    }
+}
+
 void expectTempo (const char* label, double sampleRate, double bpm, float tolerance)
 {
     const auto buffer = clicks (sampleRate, bpm, 6.0);
@@ -135,6 +174,8 @@ int main()
         const auto result = detector.detect (silent.data(), 4096, sr, 0.15f, 1.0e-4f);
         check (! result.voiced && result.midiNote < 0, "silence is unvoiced");
     }
+
+    testAudioCallbackDoesNotAnalyze();
 
     expectTempo ("140 BPM", sr, 140.0, 1.0f);
     expectTempo ("90 BPM", sr, 90.0, 1.0f);

@@ -1,4 +1,4 @@
-Awk BK is an AwkBeats VST3 analyzer for FL Studio. It reads pitch (note and cents), musical key, and BPM from the audio running through it. The sound itself passes through unchanged.
+Awk BK is an AwkBeats VST3 analyzer aimed at FL Studio on Windows and macOS. It reads pitch (note and cents), musical key, and BPM from the audio running through it. The sound itself passes through unchanged. Pitch and tempo analysis run on a background thread. Loading the plugin inside FL Studio has not been verified yet.
 
 These builds are unsigned. Windows may show SmartScreen (“Windows protected your PC”) — choose More info, then Run anyway. macOS may require a right-click → Open, a Privacy & Security allowance, or `xattr -dr com.apple.quarantine` on the package the first time.
 

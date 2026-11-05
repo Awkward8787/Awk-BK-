@@ -4,7 +4,7 @@
 
 **Awk BK** is an AwkBeats VST3 analyzer that detects pitch (note + cents), musical key, and BPM from the audio running through it. The sound itself passes through unchanged.
 
-It is for producers using FL Studio on Windows and Mac who need to read a beat’s key, pitch, and tempo while they work.
+It is aimed at producers working in FL Studio on Windows and macOS who want to read a beat’s key, pitch, and tempo while they work. CI builds the plugin and runs the DSP tests without a DAW. Loading Awk BK inside FL Studio has not been verified yet.
 
 Made by **AwkBeats**, created by Anthony Jaamal Jones (Awkward J).
 
@@ -27,9 +27,9 @@ The raw plugin bundles are on the same release if you would rather copy them you
 
 ## What it shows
 
-- **Pitch** — note and octave (for example F#3) and cents sharp or flat, from a YIN fundamental-frequency tracker.
-- **Key** — a Krumhansl–Schmuckler estimate such as `F# MINOR`, with a confidence percentage.
-- **BPM** — tempo from an onset-energy autocorrelation, shown to two decimal places.
+- **Pitch** — note and octave (for example F#3) and cents sharp or flat. The tracker is YIN (de Cheveigné and Kawahara, Journal of the Acoustical Society of America, 2002).
+- **Key** — a Krumhansl and Kessler (1982) profile match, such as `F# MINOR`, with a confidence percentage.
+- **BPM** — tempo from an onset-energy autocorrelation written for this plugin, shown to two decimal places. Pitch and tempo run on a background thread. The audio callback only copies the input into a ring buffer and updates a cheap waveform meter.
 - **TAP** — set the tempo by tapping. Ignored while Lock is on.
 - **LOCK** — freeze the current pitch, key, and BPM readouts.
 - **SENS** — detection sensitivity. Higher accepts weaker pitch and softer onsets.
@@ -53,6 +53,10 @@ Awk BK is licensed under the **GNU Affero General Public License v3.0**. See [LI
 JUCE 7 and earlier offered a GPLv3 open-source option. From JUCE 8 onward the open-source license is the **AGPLv3** ([JUCE 8 licence](https://juce.com/legal/juce-8-licence/)). This project pins [JUCE 8.0.17-security](https://github.com/juce-framework/JUCE/releases/tag/8.0.17-security) via CMake FetchContent, so the plugin is AGPLv3. That is the license that allows shipping it without a paid JUCE license. A GPLv3-only grant would not cover linking this JUCE.
 
 JUCE 8.0.17 does not draw the old JUCE splash screen (the `JUCE_DISPLAY_SPLASH_SCREEN` flag is ignored). The AGPL still applies: if you distribute the plugin, offer this source with it. For a VST3 installed on your own machine, the AGPL's extra network clause does not change normal use.
+
+### Third-party terms
+
+JUCE bundles the Steinberg VST 3 SDK. Shipping a `.vst3` is also covered by Steinberg’s VST 3 licensing terms: [VST 3 Licensing](https://steinbergmedia.github.io/vst3_dev_portal/pages/VST+3+Licensing/Index.html). JUCE’s own license text is [JUCE LICENSE.md](https://github.com/juce-framework/JUCE/blob/8.0.17-security/LICENSE.md). This paragraph is a pointer to those documents, not legal advice. The project owner states that they hold Steinberg VST 3 distribution rights; that statement is theirs and does not replace those terms or the AGPL.
 
 ## Releases
 

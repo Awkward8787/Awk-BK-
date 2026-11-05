@@ -43,7 +43,7 @@ cat > "$work/distribution.xml" <<EOF
     <choices-outline>
         <line choice="awkbk"/>
     </choices-outline>
-    <choice id="awkbk" title="Awk BK" description="Pitch, key, and BPM detector for FL Studio.">
+    <choice id="awkbk" title="Awk BK" description="Pitch, key, and BPM detector aimed at FL Studio.">
         <pkg-ref id="com.awkbeats.awkbk"/>
     </choice>
     <pkg-ref id="com.awkbeats.awkbk" version="${version}" auth="root">AwkBK-component.pkg</pkg-ref>

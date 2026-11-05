@@ -7,6 +7,7 @@
 #include "NoteUtils.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 namespace
@@ -58,23 +59,27 @@ AwkBKProcessor::AwkBKProcessor()
     fileModeParam = apvts.getRawParameterValue ("fileMode");
 }
 
+AwkBKProcessor::~AwkBKProcessor()
+{
+    stopAnalysisThread();
+}
+
 void AwkBKProcessor::prepareToPlay (double sampleRate, int)
 {
+    stopAnalysisThread();
     currentSampleRate = sampleRate > 1000.0 ? sampleRate : 48000.0;
     const int ring = std::max (16384, (int) std::ceil (currentSampleRate * 12.0));
     mono.assign ((size_t) ring, 0.0f);
-    monoWrite = 0;
-    samplesSeen = 0;
+    monoWrite.store (0);
+    ringSeq.store (0);
+    samplesSeen.store (0);
     scratch.assign ((size_t) ring, 0.0f);
     analysis.assign (4096, 0.0f);
 
     pitchDetector.prepare (4096);
     tempoDetector.prepare ((int) std::ceil (12.0 / 0.010) + 16);
 
-    samplesUntilPitch = 0;
-    samplesUntilTempo = 0;
     holdSamples = 0;
-    tapHoldSamples = 0;
     pitchReady = false;
     haveTempo = false;
     smoothLogHz = 0.0f;
@@ -86,15 +91,90 @@ void AwkBKProcessor::prepareToPlay (double sampleRate, int)
     waveAccum = 0.0f;
     waveform.fill (0.0f);
     waveWrite.store (0);
+    waveFilled.store (0);
 
     voicedAtomic.store (0);
     midiAtomic.store (-1);
     haveKeyAtomic.store (0);
     haveTempoAtomic.store (0);
     pitchConfAtomic.store (0.0f);
+    startAnalysisThread();
 }
 
-void AwkBKProcessor::releaseResources() {}
+void AwkBKProcessor::releaseResources()
+{
+    stopAnalysisThread();
+}
+
+bool AwkBKProcessor::isLocked() const noexcept
+{
+    return lockParam != nullptr && lockParam->load() >= 0.5f;
+}
+
+void AwkBKProcessor::startAnalysisThread()
+{
+    stopAnalysisThread();
+    analysisStop.store (false);
+    analysisThread = std::thread ([this] { analysisLoop(); });
+}
+
+void AwkBKProcessor::stopAnalysisThread()
+{
+    if (! analysisThread.joinable())
+        return;
+    analysisStop.store (true);
+    analysisThread.join();
+    analysisStop.store (false);
+}
+
+void AwkBKProcessor::analysisLoop()
+{
+    using clock = std::chrono::steady_clock;
+    auto nextPitch = clock::now();
+    auto nextTempo = clock::now();
+    auto tapHoldUntil = clock::time_point {};
+
+    while (! analysisStop.load (std::memory_order_acquire))
+    {
+        if (isLocked())
+        {
+            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+            continue;
+        }
+
+        const auto serial = tapSerial.load (std::memory_order_acquire);
+        if (serial != seenTapSerial)
+        {
+            seenTapSerial = serial;
+            smoothBpm = tapBpm.load (std::memory_order_relaxed);
+            haveTempo = true;
+            tapHoldUntil = clock::now() + std::chrono::seconds (3);
+            bpmAtomic.store (smoothBpm);
+            haveTempoAtomic.store (1);
+        }
+
+        const float sensitivity = sensParam != nullptr ? sensParam->load() : 0.32f;
+        const float windowAmount = windowParam != nullptr ? windowParam->load() : 0.5f;
+        const bool fileMode = fileModeParam != nullptr && fileModeParam->load() >= 0.5f;
+        const auto now = clock::now();
+
+        if (now >= nextPitch)
+        {
+            runPitch (sensitivity, windowAmount, fileMode);
+            const auto pitchHop = std::chrono::milliseconds (fileMode ? 120 : 60);
+            nextPitch = clock::now() + pitchHop;
+        }
+
+        if (now >= nextTempo && clock::now() >= tapHoldUntil)
+        {
+            runTempo (sensitivity, windowAmount, fileMode);
+            const auto tempoHop = std::chrono::milliseconds (fileMode ? 400 : 220);
+            nextTempo = clock::now() + tempoHop;
+        }
+
+        std::this_thread::sleep_for (std::chrono::milliseconds (8));
+    }
+}
 
 bool AwkBKProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
@@ -106,8 +186,9 @@ bool AwkBKProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
         || input == juce::AudioChannelSet::stereo();
 }
 
-void AwkBKProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void AwkBKProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
+    midiMessages.clear();
     juce::ScopedNoDenormals noDenormals;
 
     const int numSamples = buffer.getNumSamples();
@@ -119,16 +200,19 @@ void AwkBKProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     for (int ch = numIn; ch < numOut; ++ch)
         buffer.clear (ch, 0, numSamples);
 
+    lockedAtomic.store (isLocked() ? 1 : 0);
+    fileModeAtomic.store (fileModeParam != nullptr && fileModeParam->load() >= 0.5f ? 1 : 0);
+
     if (numIn <= 0 || numSamples <= 0 || mono.empty())
         return;
 
-    const float sensitivity = sensParam != nullptr ? sensParam->load() : 0.32f;
-    const float windowAmount = windowParam != nullptr ? windowParam->load() : 0.5f;
-    const bool locked = lockParam != nullptr && lockParam->load() >= 0.5f;
-    const bool fileMode = fileModeParam != nullptr && fileModeParam->load() >= 0.5f;
-
     auto* const* data = buffer.getArrayOfReadPointers();
     const int cap = (int) mono.size();
+
+    // Odd sequence value means a block write is in progress. The analysis
+    // thread copies only between even values, so this callback never waits.
+    ringSeq.fetch_add (1, std::memory_order_acq_rel);
+    int write = monoWrite.load (std::memory_order_relaxed);
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -137,64 +221,59 @@ void AwkBKProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             mixed += data[ch][i];
         mixed /= (float) numIn;
 
-        mono[(size_t) monoWrite] = mixed;
-        monoWrite = (monoWrite + 1) % cap;
-        ++samplesSeen;
+        mono[(size_t) write] = mixed;
+        write = (write + 1) % cap;
 
         waveAccum += mixed;
         if (++waveCount >= waveDecim)
         {
             const int idx = waveWrite.load (std::memory_order_relaxed);
             waveform[(size_t) idx] = waveAccum / (float) waveCount;
-            waveWrite.store ((idx + 1) % kWavePoints, std::memory_order_release);
+            const int next = (idx + 1) % kWavePoints;
+            waveWrite.store (next, std::memory_order_release);
+            const int filled = waveFilled.load (std::memory_order_relaxed);
+            if (filled < kWavePoints)
+                waveFilled.store (filled + 1, std::memory_order_relaxed);
             waveAccum = 0.0f;
             waveCount = 0;
         }
     }
 
-    const auto serial = tapSerial.load (std::memory_order_acquire);
-    if (serial != seenTapSerial)
-    {
-        seenTapSerial = serial;
-        if (! locked)
-        {
-            smoothBpm = tapBpm.load (std::memory_order_relaxed);
-            haveTempo = true;
-            tapHoldSamples = (int) std::lround (currentSampleRate * 3.0);
-            bpmAtomic.store (smoothBpm);
-            haveTempoAtomic.store (1);
-        }
-    }
-
-    if (tapHoldSamples > 0)
-        tapHoldSamples = std::max (0, tapHoldSamples - numSamples);
-
-    samplesUntilPitch -= numSamples;
-    samplesUntilTempo -= numSamples;
-
-    if (samplesUntilPitch <= 0)
-        runPitch (sensitivity, windowAmount, fileMode, locked);
-
-    if (samplesUntilTempo <= 0 && tapHoldSamples <= 0)
-        runTempo (sensitivity, windowAmount, fileMode, locked);
-
-    lockedAtomic.store (locked ? 1 : 0);
-    fileModeAtomic.store (fileMode ? 1 : 0);
+    monoWrite.store (write, std::memory_order_release);
+    samplesSeen.fetch_add (numSamples, std::memory_order_release);
+    ringSeq.fetch_add (1, std::memory_order_release);
 }
 
 void AwkBKProcessor::copyLatest (int count, float* dest) const
 {
     const int cap = (int) mono.size();
-    int start = monoWrite - count;
-    while (start < 0)
-        start += cap;
+    if (cap <= 0 || count <= 0)
+        return;
+    count = std::min (count, cap);
 
-    for (int i = 0; i < count; ++i)
-        dest[i] = mono[(size_t) ((start + i) % cap)];
+    for (int attempt = 0; attempt < 8; ++attempt)
+    {
+        const auto seq1 = ringSeq.load (std::memory_order_acquire);
+        if ((seq1 & 1u) != 0u)
+            continue;
+
+        int start = monoWrite.load (std::memory_order_acquire) - count;
+        while (start < 0)
+            start += cap;
+
+        for (int i = 0; i < count; ++i)
+            dest[i] = mono[(size_t) ((start + i) % cap)];
+
+        const auto seq2 = ringSeq.load (std::memory_order_acquire);
+        if (seq1 == seq2)
+            return;
+    }
 }
 
-void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileMode, bool locked)
+void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileMode)
 {
+    if (isLocked())
+        return;
     const float sens = clamp01 (sensitivity);
     const float window = clamp01 (windowAmount);
     int desired = (int) std::lround (awk::lerp (2048.0, 8192.0, (double) window));
@@ -207,9 +286,8 @@ void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileM
     desired -= desired % factor;
 
     const int hop = std::max (desired / 2, (int) std::lround (currentSampleRate * (fileMode ? 0.12 : 0.06)));
-    samplesUntilPitch = hop;
 
-    if (desired < 1024 || samplesSeen < desired || (int) scratch.size() < desired)
+    if (desired < 1024 || samplesSeen.load() < desired || (int) scratch.size() < desired)
         return;
 
     copyLatest (desired, scratch.data());
@@ -228,7 +306,7 @@ void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileM
                                               currentSampleRate / (double) factor,
                                               yinThreshold, rmsGate);
 
-    if (locked)
+    if (isLocked())
         return;
 
     if (pitch.voiced && pitch.frequencyHz > 0.0f)
@@ -288,8 +366,10 @@ void AwkBKProcessor::runPitch (float sensitivity, float windowAmount, bool fileM
     }
 }
 
-void AwkBKProcessor::runTempo (float sensitivity, float windowAmount, bool fileMode, bool locked)
+void AwkBKProcessor::runTempo (float sensitivity, float windowAmount, bool fileMode)
 {
+    if (isLocked())
+        return;
     const float window = clamp01 (windowAmount);
     float seconds = awk::lerp (2.5f, 8.0f, window);
     if (fileMode)
@@ -297,14 +377,13 @@ void AwkBKProcessor::runTempo (float sensitivity, float windowAmount, bool fileM
 
     int count = (int) std::lround (currentSampleRate * (double) seconds);
     count = std::min (count, (int) scratch.size());
-    samplesUntilTempo = (int) std::lround (currentSampleRate * (fileMode ? 0.40 : 0.22));
 
-    if (count < (int) currentSampleRate || samplesSeen < count)
+    if (count < (int) currentSampleRate || samplesSeen.load() < count)
         return;
 
     copyLatest (count, scratch.data());
     const auto tempo = tempoDetector.detect (scratch.data(), count, currentSampleRate, clamp01 (sensitivity));
-    if (locked || ! tempo.valid)
+    if (isLocked() || ! tempo.valid)
         return;
 
     if (! haveTempo)
@@ -325,6 +404,9 @@ void AwkBKProcessor::runTempo (float sensitivity, float windowAmount, bool fileM
 
 void AwkBKProcessor::tap()
 {
+    if (isLocked())
+        return;
+
     const double now = juce::Time::getMillisecondCounterHiRes();
     const double gap = lastTapMs > 0.0 ? now - lastTapMs : 0.0;
 
@@ -370,6 +452,15 @@ awk::Readout AwkBKProcessor::getReadout() const
     readout.locked = lockedAtomic.load() != 0;
     readout.fileMode = fileModeAtomic.load() != 0;
     return readout;
+}
+
+int AwkBKProcessor::newestWaveformIndex() const noexcept
+{
+    // copyWaveform starts at the write cursor, so the newest sample lands
+    // on the last index once any meter point exists.
+    if (waveFilled.load (std::memory_order_acquire) <= 0)
+        return -1;
+    return kWavePoints - 1;
 }
 
 void AwkBKProcessor::copyWaveform (float* dest, int numPoints) const

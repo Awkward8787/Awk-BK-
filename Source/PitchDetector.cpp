@@ -11,6 +11,11 @@
 namespace awk
 {
 
+// YIN fundamental-frequency estimator:
+// de Cheveigné, A. and Kawahara, H. (2002). YIN, a fundamental frequency
+// estimator for speech and music. The Journal of the Acoustical Society of
+// America, 111(4), 1917–1930.
+
 void PitchDetector::prepare (int maxSamples)
 {
     capacity = std::max (64, maxSamples);
